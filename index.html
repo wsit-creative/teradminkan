@@ -206,6 +206,33 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
   <div class="footer-bottom"><span>© <span id="footerYear">2026</span> KDKMP Sidoharjo. Semua hak dilindungi.</span><span class="footer-note">Belanja mudah, praktis, dan dekat dengan warga.</span></div>
 </footer>
 
+<div class="bottomcart" id="bottomCartBar" aria-live="polite">
+  <div class="bottomcartinner">
+    <div class="bottomcartinfo"><div class="bottomcarttitle">🛒 Keranjang · <span id="cartCount">0</span> barang</div><div class="bottomcartmeta" id="bottomCartSummary">Belum ada barang dipilih</div></div>
+    <button class="primary bottomcartbutton" id="openCart">Lihat Keranjang &amp; Checkout →</button>
+  </div>
+</div>
+
+<div class="overlay" id="cartOverlay" role="dialog" aria-modal="true" aria-label="Keranjang belanja">
+ <aside class="drawer"><div class="drawhead"><h2>Keranjang Belanja</h2><button class="close" id="closeCart" aria-label="Tutup">×</button></div>
+  <div id="cartItems" class="cartitems"></div><div class="total"><span>Total belanja</span><span id="cartTotal">Rp0</span></div>
+  <form id="checkoutForm" class="formgrid">
+   <label class="field">Nama penerima<input id="customerName" required maxlength="80" placeholder="Nama lengkap"></label>
+   <label class="field">Nomor WhatsApp<input id="customerPhone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="20" placeholder="Contoh: 081234567890"><small>Isi manual nomor WhatsApp yang bisa dihubungi.</small></label>
+   <label class="field">Tanggal pengiriman<input id="deliveryDate" type="date" required><small>Otomatis terisi hari ini. Bisa diubah jika ingin tanggal lain.</small></label>
+   <label class="field">Jam pengiriman<select id="deliveryTime" required></select><small id="deliveryTimeHint">Pilihan jam menyesuaikan waktu WIB. Slot yang sudah dimulai tidak ditampilkan.</small></label>
+   <div class="field">
+      <label for="customerAddress">Alamat lengkap</label>
+      <textarea id="customerAddress" required maxlength="500" placeholder="Nama jalan, RT/RW, dusun, desa"></textarea>
+      <button class="secondary location-btn" id="useCurrentLocation" type="button">📍 Gunakan Lokasi Saat Ini</button>
+      <small id="locationStatus">Gunakan lokasi untuk mengisi alamat dan tautan Google Maps secara otomatis.</small>
+    </div>
+   <label class="field">Catatan pesanan (opsional)<textarea id="customerNote" maxlength="300" placeholder="Catatan untuk admin"></textarea></label>
+   <div class="warning" id="entryWarning">Isi nama, nomor WhatsApp, dan alamat secara manual. Pesanan bisa dibuat langsung dari tautan website ini.</div>
+   <button class="primary wide" type="submit" id="checkoutButton">BUAT PESANAN</button>
+  </form>
+ </aside>
+</div>
 <div class="toast" id="toast" role="status"></div>
 <script>
 /* KDKMP Belanja Desa — katalog dan dashboard terhubung ke Apps Script.
