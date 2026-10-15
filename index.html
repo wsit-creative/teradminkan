@@ -623,6 +623,10 @@ function formatOrderItems(raw){
   catch(_){ return []; }
 }
 async function loadPendingOrders(){
+  // Kembalikan wadah rincian ke posisi aman sebelum daftar dimuat ulang.
+  const orderList = $("pendingOrderList");
+  const orderDetail = $("orderDetail");
+  if(orderList && orderDetail && orderDetail.parentElement !== $("orderCheckPanel")) orderList.insertAdjacentElement("afterend", orderDetail);
   $("pendingOrderList").innerHTML='<div class="empty">Memuat daftar pesanan…</div>';
   $("orderDetail").innerHTML="";
   try{
@@ -635,16 +639,57 @@ async function loadPendingOrders(){
     const orders=Array.isArray(data.orders)?data.orders:[];
     if(!orders.length){$("pendingOrderList").innerHTML='<div class="empty">Tidak ada pesanan yang menunggu konfirmasi admin.</div>';return;}
     $("pendingOrderList").innerHTML=orders.map(o=>`<button type="button" class="secondary" data-order-id="${escapeHtml(o.id)}" style="display:block;width:100%;text-align:left;margin:8px 0;padding:14px;border-radius:12px"><b>${escapeHtml(o.id)}</b> · ${escapeHtml(o.name)}<br><small>${escapeHtml(o.timestamp||"")} · ${money(o.total)} · ${o.items.length} jenis barang</small></button>`).join("");
-    $("pendingOrderList").querySelectorAll("[data-order-id]").forEach(btn=>btn.addEventListener("click",()=>showOrderDetail(orders.find(o=>o.id===btn.dataset.orderId))));
+    $("pendingOrderList").querySelectorAll("[data-order-id]").forEach(btn=>btn.addEventListener("click",()=>{
+      const detail=$("orderDetail");
+      const clickedId=btn.dataset.orderId;
+      // Klik pesanan yang sama sekali lagi untuk menyembunyikan rincian.
+      if(selectedOrderId===clickedId && detail.innerHTML.trim()){
+        detail.innerHTML="";
+        selectedOrderId="";
+        if(orderList && detail.parentElement!==$("orderCheckPanel")) orderList.insertAdjacentElement("afterend",detail);
+        return;
+      }
+      btn.insertAdjacentElement("afterend",detail);
+      showOrderDetail(orders.find(o=>o.id===clickedId));
+      detail.scrollIntoView({behavior:"smooth",block:"nearest"});
+    }));
   }catch(err){$("pendingOrderList").innerHTML=`<div class="empty">${escapeHtml(err.message||"Gagal memuat pesanan.")}</div>`;}
+}
+function showOrderProductImage(src, alt){
+  if(!src) return;
+  if(window.Swal){
+    Swal.fire({
+      imageUrl: src,
+      imageAlt: alt || "Foto produk",
+      imageWidth: "auto",
+      imageHeight: "auto",
+      width: "min(92vw, 900px)",
+      showConfirmButton: false,
+      showCloseButton: true,
+      background: "#ffffff",
+      customClass: { popup: "kdkmp-product-image-popup" }
+    });
+  } else {
+    window.open(src, "_blank", "noopener");
+  }
 }
 function showOrderDetail(order){
   if(!order)return;
   selectedOrderId=order.id;
   const items=Array.isArray(order.items)?order.items:formatOrderItems(order.items);
   preparedItemsByOrder[order.id]=preparedItemsByOrder[order.id]||{};
-  const productImageUrl = it => { const product = (Array.isArray(products) ? products : []).find(p => p.sku && it.sku && String(p.sku) === String(it.sku)); const raw = it.image || it.imageUrl || it.image_url || it.foto || it.gambar || product?.image || ""; return safeImageUrl(raw) || ""; };
-  $("orderDetail").innerHTML=`<div class="tablewrap" style="padding:16px;border-radius:14px;background:#fff"><h3 style="margin-top:0">Pesanan ${escapeHtml(order.id)}</h3><p><b>Penerima:</b> ${escapeHtml(order.name)}<br><b>WhatsApp:</b> ${escapeHtml(order.whatsapp)}<br><b>Alamat:</b> ${escapeHtml(order.address)}<br><b>Jadwal:</b> ${escapeHtml(order.deliveryDate||"-")} · ${escapeHtml(order.deliveryTime||"-")}<br><b>Catatan:</b> ${escapeHtml(order.note||"-")}</p><h4>Checklist barang yang disiapkan</h4><div id="orderItemChecks">${items.map((it,i)=>{const img=productImageUrl(it);return `<label style="display:flex;gap:10px;align-items:center;padding:12px;border-bottom:1px solid #eee;cursor:pointer"><input type="checkbox" data-item-index="${i}" ${preparedItemsByOrder[order.id][i]?"checked":""} style="width:20px;height:20px;flex:0 0 auto"><img src="${escapeHtml(img)}" alt="Foto ${escapeHtml(it.name||it.sku||"barang")}" loading="lazy" style="width:68px;height:68px;object-fit:contain;flex:0 0 68px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;${img?"":"display:none"}" onerror="this.style.display='none'"><span style="min-width:0"><b>${escapeHtml(it.name||it.sku||"Barang")}</b>${it.sku?`<br><small style="color:#6b7280">SKU: ${escapeHtml(it.sku)}</small>`:""}<br>Jumlah: ${Number(it.qty)||0} ${escapeHtml(it.unit||"pcs")} · ${money(it.subtotal??((Number(it.price)||0)*(Number(it.qty)||0)))}</span></label>`;}).join("")}</div><p id="orderChecklistHint" style="font-size:12px;color:var(--muted)">Centang semua barang setelah selesai disiapkan.</p><button type="button" class="primary wide" id="markOrderShipped">PESANAN DIKIRIM</button></div>`;
+  const productImageUrl = it => {
+    const sku = String(it.sku || it.SKU || it.kode || "").trim();
+    const allProducts = [
+      ...(Array.isArray(products) ? products : []),
+      ...(Array.isArray(subsidyProducts) ? subsidyProducts : [])
+    ];
+    const product = allProducts.find(p => String(p.sku || p.SKU || p.kode || "").trim() === sku);
+    const raw = it.image || it.imageUrl || it.image_url || it.Image_URL || it.foto || it.gambar ||
+      product?.image || product?.imageUrl || product?.image_url || product?.Image_URL || product?.foto || product?.gambar || "";
+    return safeImageUrl(raw) || "";
+  };
+  $("orderDetail").innerHTML=`<div class="tablewrap" style="padding:16px;border-radius:14px;background:#fff"><h3 style="margin-top:0">Pesanan ${escapeHtml(order.id)}</h3><p><b>Penerima:</b> ${escapeHtml(order.name)}<br><b>WhatsApp:</b> ${escapeHtml(order.whatsapp)}<br><b>Alamat:</b> ${escapeHtml(order.address)}<br><b>Jadwal:</b> ${escapeHtml(order.deliveryDate||"-")} · ${escapeHtml(order.deliveryTime||"-")}<br><b>Catatan:</b> ${escapeHtml(order.note||"-")}</p><h4>Checklist barang yang disiapkan</h4><div id="orderItemChecks">${items.map((it,i)=>{const img=productImageUrl(it);return `<label style="display:flex;gap:10px;align-items:center;padding:12px;border-bottom:1px solid #eee;cursor:pointer"><input type="checkbox" data-item-index="${i}" ${preparedItemsByOrder[order.id][i]?"checked":""} style="width:20px;height:20px;flex:0 0 auto"><img src="${escapeHtml(img)}" alt="Foto ${escapeHtml(it.name||it.sku||"barang")}" loading="lazy" style="width:68px;height:68px;object-fit:contain;flex:0 0 68px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:zoom-in;${img?"":"display:none"}" onclick="event.preventDefault();event.stopPropagation();showOrderProductImage(this.src,this.alt)" onerror="this.style.display='none'"><span style="min-width:0"><b>${escapeHtml(it.name||it.sku||"Barang")}</b>${it.sku?`<br><small style="color:#6b7280">SKU: ${escapeHtml(it.sku)}</small>`:""}<br>Jumlah: ${Number(it.qty)||0} ${escapeHtml(it.unit||"pcs")} · ${money(it.subtotal??((Number(it.price)||0)*(Number(it.qty)||0)))}</span></label>`;}).join("")}</div><p id="orderChecklistHint" style="font-size:12px;color:var(--muted)">Centang semua barang setelah selesai disiapkan.</p><button type="button" class="primary wide" id="markOrderShipped">PESANAN DIKIRIM</button></div>`;
   $("orderItemChecks").querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.addEventListener("change",()=>{preparedItemsByOrder[order.id][cb.dataset.itemIndex]=cb.checked;const all=[...$("orderItemChecks").querySelectorAll('input[type="checkbox"]')].every(x=>x.checked);$("markOrderShipped").disabled=!all;$("orderChecklistHint").textContent=all?"Semua barang sudah dicentang. Pesanan siap ditandai dikirim.":"Centang semua barang setelah selesai disiapkan.";}));
   $("markOrderShipped").disabled=!items.length||!items.every((_,i)=>preparedItemsByOrder[order.id][i]);
   $("markOrderShipped").onclick=async()=>{
