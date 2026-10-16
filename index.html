@@ -158,7 +158,8 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
   <section class="adminpanel" id="orderCheckPanel">
     <h2>Cek Pesanan</h2>
     <p style="color:var(--muted);font-size:13px">Daftar hanya menampilkan pesanan berstatus MENUNGGU KONFIRMASI ADMIN. Pilih ID untuk melihat barang dan checklist persiapan.</p>
-    <p style="font-size:12px;color:var(--muted);margin:12px 0">Cek pesanan menggunakan token admin yang sudah diisi pada panel admin produk biasa.</p>
+    <p style="font-size:12px;color:var(--muted);margin:12px 0">Masukkan token admin untuk memuat daftar pesanan. Token ini hanya digunakan untuk permintaan panel Cek Pesanan.</p>
+    <label class="field" style="max-width:420px;margin:12px 0">Token Admin Cek Pesanan<input id="orderAdminToken" type="password" autocomplete="current-password" placeholder="Masukkan token admin"></label>
     <div class="adminactions"><button class="primary" id="reloadOrders" type="button">Muat Ulang Pesanan</button></div>
     <div id="pendingOrderList" style="margin-top:14px"><div class="empty">Klik “Muat Ulang Pesanan” untuk melihat pesanan yang menunggu konfirmasi admin.</div></div>
     <div id="orderDetail" style="margin-top:18px"></div>
@@ -243,7 +244,7 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
 
 const CONFIG={
 
- APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbzIKnWru6KZFrqRCo150VtLNNtmloa32G8PzlTeFdwCF2E6n_VjK8HY3iA1T3T-dH0/exec", // Pastikan ini URL /exec deployment terbaru.
+ APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbyD6_CJgCCDhPm11nwufZVMNEJ7yEyidycTaCj3ZIhqlEPTpueES9vb-4O4Gh-7pn0/exec", // Pastikan ini URL /exec deployment terbaru.
 
  ADMIN_WHATSAPP:"6282338804175", // GANTI dengan nomor WhatsApp resmi KDKMP, format 62...
 
@@ -615,7 +616,7 @@ loadSubsidy();
 /* Panel cek pesanan: checklist tersimpan pada tampilan selama panel terbuka. */
 let selectedOrderId = "";
 const preparedItemsByOrder = {};
-function orderToken(){ return ""; }
+function orderToken(){ const own=clean($("orderAdminToken")?.value); return own || requireAdminToken(); }
 function formatOrderItems(raw){
   try { const items = typeof raw === "string" ? JSON.parse(raw) : raw; return Array.isArray(items) ? items : []; }
   catch(_){ return []; }
@@ -628,12 +629,18 @@ async function loadPendingOrders(){
   $("pendingOrderList").innerHTML='<div class="empty">Memuat daftar pesanan…</div>';
   $("orderDetail").innerHTML="";
   try{
-    const u=new URL(CONFIG.APPS_SCRIPT_URL);
-    u.searchParams.set("action","pendingOrders");
-    u.searchParams.set("_",String(Date.now()));
-    const res=await fetch(u.href,{cache:"no-store"});
+    const token=orderToken();
+    if(!token) throw new Error("Masukkan token admin pada panel admin produk biasa terlebih dahulu.");
+    const res=await fetch(CONFIG.APPS_SCRIPT_URL,{
+      method:"POST",
+      mode:"cors",
+      cache:"no-store",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({action:"pendingOrders",token})
+    });
+    if(!res.ok) throw new Error("HTTP "+res.status);
     const data=await res.json();
-    if(!res.ok||!data.ok) throw new Error(data.error||"Gagal memuat pesanan.");
+    if(!data.ok) throw new Error(data.error||"Gagal memuat pesanan.");
     const orders=Array.isArray(data.orders)?data.orders:[];
     if(!orders.length){$("pendingOrderList").innerHTML='<div class="empty">Tidak ada pesanan yang menunggu konfirmasi admin.</div>';return;}
     $("pendingOrderList").innerHTML=orders.map(o=>`<button type="button" class="secondary" data-order-id="${escapeHtml(o.id)}" style="display:block;width:100%;text-align:left;margin:8px 0;padding:14px;border-radius:12px"><b>${escapeHtml(o.id)}</b> · ${escapeHtml(o.name)}<br><small>${escapeHtml(o.timestamp||"")} · ${money(o.total)} · ${o.items.length} jenis barang</small></button>`).join("");
@@ -700,7 +707,9 @@ function showOrderDetail(order){
     if(!confirmed)return;
     $("markOrderShipped").disabled=true;$("markOrderShipped").textContent="Memproses…";
     try{
-      await apiWrite({action:"markOrderShipped",id:order.id});
+      const token=orderToken();
+      if(!token) throw new Error("Masukkan token admin pada panel admin produk biasa terlebih dahulu.");
+      await apiWrite({action:"markOrderShipped",id:order.id,token});
       if(window.Swal) await Swal.fire({icon:"success",title:"Permintaan diproses",text:"Status pesanan dikirim untuk diperbarui. Daftar akan dimuat ulang.",confirmButtonColor:"#b91c1c",timer:2200,timerProgressBar:true});
       else toast("Permintaan perubahan status dikirim. Memuat ulang daftar…");
       await loadPendingOrders();$("orderDetail").innerHTML="";
