@@ -643,7 +643,21 @@ async function loadPendingOrders(){
     if(!data.ok) throw new Error(data.error||"Gagal memuat pesanan.");
     const orders=Array.isArray(data.orders)?data.orders:[];
     if(!orders.length){$("pendingOrderList").innerHTML='<div class="empty">Tidak ada pesanan yang menunggu konfirmasi admin.</div>';return;}
-    $("pendingOrderList").innerHTML=orders.map(o=>`<button type="button" class="secondary" data-order-id="${escapeHtml(o.id)}" style="display:block;width:100%;text-align:left;margin:8px 0;padding:14px;border-radius:12px"><b>${escapeHtml(o.id)}</b> · ${escapeHtml(o.name)}<br><small>${escapeHtml(o.timestamp||"")} · ${money(o.total)} · ${o.items.length} jenis barang</small></button>`).join("");
+    $("pendingOrderList").innerHTML=orders.map(o=>`<div data-order-row style="display:flex;gap:8px;align-items:center;margin:8px 0;width:100%;min-width:0"><button type="button" class="secondary" data-order-id="${escapeHtml(o.id)}" style="display:block;flex:1 1 auto;width:0;min-width:0;text-align:left;margin:0;padding:14px;border-radius:12px"><b>${escapeHtml(o.id)}</b> · ${escapeHtml(o.name)}<br><small>${escapeHtml(o.timestamp||"")} · ${money(o.total)} · ${(Array.isArray(o.items)?o.items:formatOrderItems(o.items)).length} jenis barang</small></button><button type="button" class="secondary" data-copy-order-id="${escapeHtml(o.id)}" title="Salin rekap pesanan untuk WhatsApp" aria-label="Salin rekap pesanan ${escapeHtml(o.id)}" style="flex:0 0 auto;align-self:center;padding:10px 14px;border-radius:12px;white-space:nowrap">📋 Salin isi WA</button></div>`).join("");
+    $("pendingOrderList").querySelectorAll("[data-copy-order-id]").forEach(btn=>btn.addEventListener("click",async()=>{
+      const order=orders.find(o=>o.id===btn.dataset.copyOrderId);
+      if(!order)return;
+      const text=buildWhatsAppOrderText(order);
+      try{
+        if(navigator.clipboard&&window.isSecureContext) await navigator.clipboard.writeText(text);
+        else{
+          const field=document.createElement("textarea");field.value=text;field.style.position="fixed";field.style.opacity="0";document.body.appendChild(field);field.select();
+          const copied=document.execCommand("copy");field.remove();if(!copied)throw new Error("Salin otomatis tidak didukung browser ini.");
+        }
+        const old=btn.textContent;btn.textContent="✓ Tersalin";setTimeout(()=>{if(btn.isConnected)btn.textContent=old},1800);
+        toast("Isi pesanan berhasil disalin. Siap ditempel ke WhatsApp.");
+      }catch(err){toast("Gagal menyalin otomatis. Coba buka panel detail pesanan lalu salin secara manual.");}
+    }));
     $("pendingOrderList").querySelectorAll("[data-order-id]").forEach(btn=>btn.addEventListener("click",()=>{
       const detail=$("orderDetail");
       const clickedId=btn.dataset.orderId;
@@ -654,11 +668,67 @@ async function loadPendingOrders(){
         if(orderList && detail.parentElement!==$("orderCheckPanel")) orderList.insertAdjacentElement("afterend",detail);
         return;
       }
-      btn.insertAdjacentElement("afterend",detail);
+      // Tempatkan detail setelah seluruh baris pesanan (bukan di antara tombol
+      // pilih pesanan dan tombol salin), agar layout tombol tidak melebar/menyempit.
+      const orderRow=btn.closest('[data-order-row]') || btn.parentElement;
+      orderRow.insertAdjacentElement("afterend",detail);
       showOrderDetail(orders.find(o=>o.id===clickedId));
       detail.scrollIntoView({behavior:"smooth",block:"nearest"});
     }));
   }catch(err){$("pendingOrderList").innerHTML=`<div class="empty">${escapeHtml(err.message||"Gagal memuat pesanan.")}</div>`;}
+}
+function buildWhatsAppOrderText(order){
+  const items=Array.isArray(order.items)?order.items:formatOrderItems(order.items);
+  const cleanText=value=>String(value??"").trim();
+  const moneyText=value=>money(Number(value)||0);
+  const dateRaw=cleanText(order.deliveryDate||order.delivery_date||"");
+  let deliveryDate=dateRaw;
+  if(/^\d{4}-\d{2}-\d{2}/.test(dateRaw)) deliveryDate=dateRaw.slice(0,10);
+  else if(dateRaw){
+    const parsed=new Date(dateRaw);
+    if(!Number.isNaN(parsed.getTime())) deliveryDate=[parsed.getFullYear(),String(parsed.getMonth()+1).padStart(2,"0"),String(parsed.getDate()).padStart(2,"0")].join("-");
+  }
+  const phone=cleanText(order.whatsapp).replace(/^\+?/, "");
+  const address=cleanText(order.address);
+  const addressLines=address.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  let mapsUrl="";
+  const mapMatch=address.match(/(?:Link\s+Google\s+Maps|Google\s+Maps)\s*:\s*(https?:\/\/\S+)/i);
+  if(mapMatch) mapsUrl=mapMatch[1].replace(/[),.]+$/,"");
+  const plainAddress=address
+    .replace(/(?:Link\s+Google\s+Maps|Google\s+Maps)\s*:\s*https?:\/\/\S+/ig,"")
+    .replace(/^Alamat\s*:\s*/i,"")
+    .replace(/[\r\n]+/g,", ")
+    .replace(/\s*,\s*,/g,", ")
+    .trim();
+  const divider="━━━━━━━━━━━━━━━━━━━━";
+  const lines=[
+    "*PESANAN KDKMP*",
+    `Nomor Pesanan: ${cleanText(order.id)}`,
+    `Nama: ${cleanText(order.name)}`,
+    `WhatsApp: ${phone?(phone.startsWith("62")?"+":"+")+phone:cleanText(order.whatsapp)}`,
+    `Tanggal Pengiriman: ${deliveryDate||"-"}`,
+    `Jam Pengiriman: ${cleanText(order.deliveryTime||order.delivery_time||"-")}`,
+    "",
+    divider,
+    "",
+    "*Daftar Belanja:*",
+    ...items.map(it=>{
+      const qty=Number(it.qty)||0;
+      const price=Number(it.price)||0;
+      const subtotal=Number(it.subtotal??(price*qty))||0;
+      return `• ${cleanText(it.name||it.sku||"Barang")}${it.isSubsidy?" [BARANG SUBSIDI]":""} × ${qty} ${cleanText(it.unit||"pcs")} | ${moneyText(price)} × ${qty} = ${moneyText(subtotal)}`;
+    }),
+    `*Total: ${moneyText(order.total??items.reduce((sum,it)=>sum+(Number(it.subtotal??((Number(it.price)||0)*(Number(it.qty)||0)))||0),0))}*`,
+    "",
+    divider,
+    ""
+  ];
+  if(plainAddress) lines.push(plainAddress);
+  if(mapsUrl) lines.push(`Link Google Maps: ${mapsUrl}`);
+  else if(address&&!plainAddress) lines.push(address);
+  if(cleanText(order.note)&&cleanText(order.note)!=="-") lines.push("",`Catatan: ${cleanText(order.note)}`);
+  lines.push("","Status: PESANAN ANDA SEDANG DISIAPKAN","Mohon untuk berada di *lokasi* pada *waktu* yang Anda pilih karena kurir kami akan segera mengirimkan pesanan Anda. Terima kasih 😊");
+  return lines.join("\n");
 }
 function showOrderProductImage(src, alt){
   if(!src) return;
