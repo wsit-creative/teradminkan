@@ -124,7 +124,7 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
   <div class="admin-panel-launchers" aria-label="Pilihan panel admin" style="display:flex;justify-content:center;align-items:stretch;gap:12px;flex-wrap:wrap;margin:28px auto 8px;max-width:1120px">
 <button type="button" class="adminlink" id="adminToggle" aria-controls="adminPanel" aria-expanded="false">Buka panel admin produk biasa</button>
 <button type="button" class="adminlink" id="subsidyProductToggle" aria-controls="subsidyProductPanel" aria-expanded="false">Buka panel barang subsidi</button>
-<button type="button" class="adminlink" id="orderCheckToggle" aria-controls="orderCheckPanel" aria-expanded="false">Cek pesanan</button><button type="button" class="adminlink" id="recipientToggle" aria-controls="subsidyRecipientPanel" aria-expanded="false">Buka panel penerima subsidi</button>
+<button type="button" class="adminlink" id="orderCheckToggle" aria-controls="orderCheckPanel" aria-expanded="false">Cek pesanan</button><button type="button" class="adminlink" id="deliveryRouteToggle" aria-controls="deliveryRoutePanel" aria-expanded="false">Pengiriman / Rekomendasi Rute</button><button type="button" class="adminlink" id="recipientToggle" aria-controls="subsidyRecipientPanel" aria-expanded="false">Buka panel penerima subsidi</button>
 </div>
 
     <!-- Barang biasa dan subsidi ditampilkan dalam satu katalog; pengelolaan admin tetap terpisah. -->
@@ -163,6 +163,16 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
     <div class="adminactions"><button class="primary" id="reloadOrders" type="button">Muat Ulang Pesanan</button></div>
     <div id="pendingOrderList" style="margin-top:14px"><div class="empty">Klik “Muat Ulang Pesanan” untuk melihat pesanan yang menunggu konfirmasi admin.</div></div>
     <div id="orderDetail" style="margin-top:18px"></div>
+  </section>
+  <section class="adminpanel" id="deliveryRoutePanel">
+    <h2>Pengiriman — Rekomendasi Rute</h2>
+    <p style="color:var(--muted);font-size:13px">Menampilkan pesanan berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba atau terlewat dan belum selesai. Pesanan dengan jadwal mendatang tidak ditampilkan. Gunakan posisi GPS perangkat sebagai titik awal.</p>
+    <div class="adminactions">
+      <button class="primary" type="button" id="buildDeliveryRoute">📍 Buat Rekomendasi Rute</button>
+      <button class="secondary" type="button" id="reloadDeliveryOrders">Muat Ulang Pengiriman</button>
+    </div>
+    <div id="deliveryRouteStatus" class="empty" style="margin-top:14px">Masukkan token admin pada panel Cek Pesanan, lalu buat rekomendasi rute.</div>
+    <div id="deliveryRouteOrders" style="margin-top:12px"></div><div id="deliveryRouteStops" style="margin-top:12px"></div>
   </section>
 
 </main>
@@ -244,7 +254,7 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
 
 const CONFIG={
 
- APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbyNXMeqIq94V3c1dFvaPSUWO78lnQ59Y414YbfRQhxaRgZE2Ta1Rs-NCIQ7KTfyfu8/exec", // Pastikan ini URL /exec deployment terbaru.
+ APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbzsu-R6R4_ILRagmiglYnDNVbTDmCxFkvTUmVgJ1iNWJDtIBvMeV56OrzeAySTtyn4/exec", // Pastikan ini URL /exec deployment terbaru.
 
  ADMIN_WHATSAPP:"6282338804175", // GANTI dengan nomor WhatsApp resmi KDKMP, format 62...
 
@@ -789,6 +799,62 @@ function showOrderDetail(order){
     }
   };
 }
+// Daftar pengiriman: hanya PESANAN DIKIRIM yang jadwalnya sudah tiba/terlewat.
+let routeOrdersCache = [];
+async function loadDeliveryOrders(){
+  const status=$("deliveryRouteStatus"), list=$("deliveryRouteOrders");
+  if(list) list.innerHTML='<div class="empty">Memuat daftar pengiriman…</div>';
+  try{
+    const token=orderToken(); if(!token) throw new Error("Masukkan token admin pada panel Cek Pesanan terlebih dahulu.");
+    const res=await fetch(CONFIG.APPS_SCRIPT_URL,{method:"POST",mode:"cors",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"deliveryOrders",token})});
+    const data=await res.json(); if(!data.ok) throw new Error(data.error||"Gagal memuat daftar pengiriman.");
+    routeOrdersCache=Array.isArray(data.orders)?data.orders:[];
+    if(!routeOrdersCache.length){list.innerHTML='<div class="empty">Belum ada pesanan berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba dan belum selesai.</div>';if(status)status.textContent="Daftar pengiriman diperbarui.";return;}
+    list.innerHTML=routeOrdersCache.map(o=>`<div class="tablewrap" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px;margin:8px 0;border-radius:12px;flex-wrap:wrap"><div style="min-width:180px;flex:1"><b>${escapeHtml(o.id)}</b> — ${escapeHtml(o.name||"")}<br><small>${escapeHtml(o.deliveryDate||"-")} · ${escapeHtml(o.deliveryTime||"-")}</small><br><small>${escapeHtml(o.address||"")}</small></div><button type="button" class="primary" data-complete-order="${escapeHtml(o.id)}" style="flex:0 0 auto">✓ Selesai</button></div>`).join("");
+    list.querySelectorAll('[data-complete-order]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const id=btn.dataset.completeOrder;
+      let confirmed=true;
+      if(window.Swal){const r=await Swal.fire({icon:"question",title:"Selesaikan pengiriman?",html:`Ubah status <b>${escapeHtml(id)}</b> menjadi <b>SELESAI</b>?`,showCancelButton:true,confirmButtonText:"Ya, selesai",cancelButtonText:"Batal",confirmButtonColor:"#116149"});confirmed=r.isConfirmed;}
+      else confirmed=confirm(`Ubah status ${id} menjadi SELESAI?`);
+      if(!confirmed)return;
+      btn.disabled=true;btn.textContent="Memproses…";
+      try{const result=await apiWrite({action:"completeOrder",id,token:orderToken()});if(!result||!result.ok)throw new Error(result?.error||"Gagal mengubah status.");toast("Status pesanan berhasil diubah menjadi SELESAI.");await loadDeliveryOrders();}
+      catch(err){btn.disabled=false;btn.textContent="✓ Selesai";toast(err.message||"Gagal menyelesaikan pengiriman.");}
+    }));
+    if(status)status.textContent=`Ada ${routeOrdersCache.length} pesanan yang siap/terlambat dikirim dan belum berstatus SELESAI.`;
+  }catch(err){if(list)list.innerHTML=`<div class="empty">${escapeHtml(err.message||"Gagal memuat pengiriman.")}</div>`;if(status)status.textContent=err.message||"Gagal memuat pengiriman.";}
+}
+function routeAddressForOrder(order){
+  const raw=String(order.address||order.alamat||"").trim();
+  const urls=raw.match(/https?:\/\/[^\s<>]+/ig)||[];
+  const mapUrl=urls.find(u=>/google\.[^/]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(u));
+  if(mapUrl){try{const u=new URL(mapUrl.replace(/[),.;]+$/, ""));const query=u.searchParams.get("q")||u.searchParams.get("query")||"";const coord=query.match(/(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);if(coord)return coord[1]+","+coord[2];const at=u.pathname.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);if(at)return at[1]+","+at[2];}catch(_){}}
+  return raw.replace(/https?:\/\/[^\s<>]+/ig,"").replace(/Link Google Maps\s*:\s*/ig,"").trim()||mapUrl||"";
+}
+function openOptimizedDeliveryRoute(){
+  const status=$("deliveryRouteStatus"), list=$("deliveryRouteStops");list.innerHTML="";status.textContent="Memuat daftar pengiriman dan meminta izin lokasi…";
+  const go=async()=>{
+    await loadDeliveryOrders();
+    if(!routeOrdersCache.length){status.textContent="Tidak ada pesanan yang jadwalnya sudah tiba dan belum selesai.";return;}
+    const stops=routeOrdersCache.map(o=>({order:o,address:routeAddressForOrder(o)})).filter(x=>x.address);
+    if(!stops.length){status.textContent="Tidak ditemukan alamat/tautan Google Maps pada pesanan pengiriman.";return;}
+    // Urutan daftar lokal mengikuti jadwal; Google Maps tidak menjamin label khusus pada pin.
+    const startMaps=(origin)=>{
+      const destinations=stops.map(x=>x.address);let url;
+      if(destinations.length===1)url="https://www.google.com/maps/dir/?api=1&origin="+encodeURIComponent(origin)+"&destination="+encodeURIComponent(destinations[0])+"&travelmode=driving";
+      else {const destination=destinations[destinations.length-1],waypoints=destinations.slice(0,-1).join("|");url="https://www.google.com/maps/dir/?api=1&origin="+encodeURIComponent(origin)+"&destination="+encodeURIComponent(destination)+"&waypoints="+encodeURIComponent(waypoints)+"&travelmode=driving";}
+      status.innerHTML=`Ditemukan <b>${stops.length}</b> tujuan pengiriman yang jadwalnya sudah tiba/terlewat. Urutan tujuan mengikuti daftar di bawah; periksa rute sebelum berangkat.`;
+      list.innerHTML=stops.map((x,i)=>`<div class="tablewrap" style="padding:12px;margin:8px 0;border-radius:12px"><b>${i+1}. ${escapeHtml(x.order.id||"Pesanan")} — ${escapeHtml(x.order.name||"")}</b><br><small>${escapeHtml(x.order.deliveryDate||"")} · ${escapeHtml(x.order.deliveryTime||"")}</small><br><small>${escapeHtml(String(x.order.address||""))}</small></div>`).join("")+'<p style="font-size:12px;color:var(--muted)">Google Maps biasa tidak menyediakan cara yang andal untuk menampilkan ID pesanan sebagai judul khusus pada pin rute. ID dan nama tetap ditampilkan pada daftar pengiriman di halaman ini.</p>';
+      window.open(url,"_blank","noopener");
+    };
+    if(!navigator.geolocation){startMaps("KDKMP Sidoharjo, Tanjunganom, Nganjuk");return;}
+    navigator.geolocation.getCurrentPosition(pos=>startMaps(pos.coords.latitude+","+pos.coords.longitude),()=>startMaps("KDKMP Sidoharjo, Tanjunganom, Nganjuk"),{enableHighAccuracy:true,timeout:12000,maximumAge:60000});
+  };go().catch(err=>{status.textContent=err.message||"Gagal membuat rute pengiriman.";});
+}
+$("buildDeliveryRoute")?.addEventListener("click",openOptimizedDeliveryRoute);
+$("reloadDeliveryOrders")?.addEventListener("click",loadDeliveryOrders);
+$("deliveryRouteToggle")?.addEventListener("click",()=>{const panel=$("deliveryRoutePanel");panel.classList.toggle("show");$("deliveryRouteToggle").setAttribute("aria-expanded",panel.classList.contains("show")?"true":"false");if(panel.classList.contains("show")){panel.scrollIntoView({behavior:"smooth"});loadDeliveryOrders();}});
+
 $("reloadOrders")?.addEventListener("click",loadPendingOrders);
 $("orderCheckToggle")?.addEventListener("click",()=>{const panel=$("orderCheckPanel");panel.classList.toggle("show");$("orderCheckToggle").setAttribute("aria-expanded",panel.classList.contains("show")?"true":"false");if(panel.classList.contains("show")){panel.scrollIntoView({behavior:"smooth"});loadPendingOrders();}});
 
