@@ -810,19 +810,31 @@ async function loadDeliveryOrders(){
     const data=await res.json(); if(!data.ok) throw new Error(data.error||"Gagal memuat daftar pengiriman.");
     routeOrdersCache=Array.isArray(data.orders)?data.orders:[];
     if(!routeOrdersCache.length){list.innerHTML='<div class="empty">Belum ada pesanan berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba dan belum selesai.</div>';if(status)status.textContent="Daftar pengiriman diperbarui.";return;}
-    list.innerHTML=routeOrdersCache.map(o=>`<div class="tablewrap" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px;margin:8px 0;border-radius:12px;flex-wrap:wrap"><div style="min-width:180px;flex:1"><b>${escapeHtml(o.id)}</b> — ${escapeHtml(o.name||"")}<br><small>${escapeHtml(o.deliveryDate||"-")} · ${escapeHtml(o.deliveryTime||"-")}</small><br><small>${escapeHtml(o.address||"")}</small></div><button type="button" class="primary" data-complete-order="${escapeHtml(o.id)}" style="flex:0 0 auto">✓ Selesai</button></div>`).join("");
-    list.querySelectorAll('[data-complete-order]').forEach(btn=>btn.addEventListener('click',async()=>{
-      const id=btn.dataset.completeOrder;
-      let confirmed=true;
-      if(window.Swal){const r=await Swal.fire({icon:"question",title:"Selesaikan pengiriman?",html:`Ubah status <b>${escapeHtml(id)}</b> menjadi <b>SELESAI</b>?`,showCancelButton:true,confirmButtonText:"Ya, selesai",cancelButtonText:"Batal",confirmButtonColor:"#116149"});confirmed=r.isConfirmed;}
-      else confirmed=confirm(`Ubah status ${id} menjadi SELESAI?`);
-      if(!confirmed)return;
-      btn.disabled=true;btn.textContent="Memproses…";
-      try{const result=await apiWrite({action:"completeOrder",id,token:orderToken()});if(!result||!result.ok)throw new Error(result?.error||"Gagal mengubah status.");toast("Status pesanan berhasil diubah menjadi SELESAI.");await loadDeliveryOrders();}
-      catch(err){btn.disabled=false;btn.textContent="✓ Selesai";toast(err.message||"Gagal menyelesaikan pengiriman.");}
-    }));
+    list.innerHTML=routeOrdersCache.map(o=>`<div class="tablewrap" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px;margin:8px 0;border-radius:12px;flex-wrap:wrap"><div style="min-width:180px;flex:1"><b>${escapeHtml(o.id)}</b> — ${escapeHtml(o.name||"")}<br><small>${escapeHtml(o.deliveryDate||"-")} · ${escapeHtml(o.deliveryTime||"-")}</small><br><small>${escapeHtml(o.address||"")}</small></div></div>`).join("");
+    // Tombol Selesai sengaja tidak ditampilkan pada daftar mentah ini.
     if(status)status.textContent=`Ada ${routeOrdersCache.length} pesanan yang siap/terlambat dikirim dan belum berstatus SELESAI.`;
   }catch(err){if(list)list.innerHTML=`<div class="empty">${escapeHtml(err.message||"Gagal memuat pengiriman.")}</div>`;if(status)status.textContent=err.message||"Gagal memuat pengiriman.";}
+}
+
+async function completeDeliveryOrder(id,btn){
+  let confirmed=true;
+  if(window.Swal){const r=await Swal.fire({icon:"question",title:"Selesaikan pengiriman?",html:`Ubah status <b>${escapeHtml(id)}</b> menjadi <b>SELESAI</b>?`,showCancelButton:true,confirmButtonText:"Ya, selesai",cancelButtonText:"Batal",confirmButtonColor:"#b91c1c"});confirmed=r.isConfirmed;}
+  else confirmed=confirm(`Ubah status ${id} menjadi SELESAI?`);
+  if(!confirmed)return;
+  btn.disabled=true;btn.textContent="Memproses…";
+  try{
+    const token=orderToken();if(!token)throw new Error("Masukkan token admin pada panel Cek Pesanan terlebih dahulu.");
+    // Gunakan iframe bridge agar Apps Script mengembalikan JSON hasil nyata.
+    // fetch(mode:no-cors) hanya menghasilkan opaque response, sehingga suksesnya tidak dapat diperiksa.
+    const result=await postSubsidyRequest({action:"completeOrder",id,token});
+    if(!result||!result.ok)throw new Error(result?.error||"Server belum mengonfirmasi perubahan status.");
+    btn.textContent="✓ Selesai";btn.disabled=true;
+    toast("Status pesanan berhasil diubah menjadi SELESAI.");
+    routeOrdersCache=routeOrdersCache.filter(o=>o.id!==id);
+    await loadDeliveryOrders();
+    // Bangun ulang daftar bernomor sesuai urutan rute yang tersimpan, tanpa mengubah urutan Maps.
+    if(window.__kdkmpLastRouteRender)window.__kdkmpLastRouteRender();
+  }catch(err){btn.disabled=false;btn.textContent="✓ Selesai";toast(err.message||"Gagal menyelesaikan pengiriman.");}
 }
 function routeCoordinateForOrder(order){
   const raw=String(order.address||order.alamat||"").trim();
@@ -896,7 +908,13 @@ function openOptimizedDeliveryRoute(){
       }
       const coordCount=orderedStops.filter(x=>x.coord).length;
       status.innerHTML=`Ditemukan <b>${orderedStops.length}</b> tujuan. Daftar bernomor dan urutan tujuan Google Maps menggunakan urutan yang sama. ${originCoord?`Titik berkoordinat diurutkan dengan tujuan terdekat lebih dulu (${coordCount} dari ${orderedStops.length} tujuan punya koordinat).`:`Lokasi GPS tidak tersedia; urutan terdekat tidak dapat dihitung.`}`;
-      list.innerHTML='<div class="tablewrap" style="padding:12px;margin:8px 0;border-radius:12px"><b>Mulai — Lokasi perangkat</b><br><small>Ini titik awal, bukan pesanan pelanggan.</small></div>'+orderedStops.map((x,i)=>`<div class="tablewrap" style="padding:12px;margin:8px 0;border-radius:12px;display:flex;gap:10px;align-items:flex-start"><div style="flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-weight:800">${i+1}</div><div style="min-width:0;flex:1"><b>TITIK ${i+1} — ${escapeHtml(x.order.id||"Pesanan")}</b><br><b>${escapeHtml(x.order.name||"Nama penerima tidak tersedia")}</b><br><small>${escapeHtml(x.order.deliveryDate||"")} · ${escapeHtml(x.order.deliveryTime||"")}</small><br><small>${escapeHtml(String(x.order.address||""))}</small>${!x.coord?'<br><small style="color:#a16207">Koordinat tidak ditemukan; ditempatkan setelah tujuan berkoordinat.</small>':''}</div></div>`).join('')+'<p style="font-size:12px;color:var(--muted)">Catatan: daftar dan tautan Maps memakai urutan eksplisit yang sama agar pesanan tidak tertukar. Urutan terdekat dihitung dari jarak garis lurus berdasarkan koordinat GPS, bukan jarak atau waktu tempuh jalan. Untuk optimasi jalan sesungguhnya diperlukan layanan rute. Tujuan tanpa koordinat diletakkan di akhir.</p>';
+      window.__kdkmpOrderedStops=orderedStops;
+      window.__kdkmpLastRouteRender=()=>{
+        const active=window.__kdkmpOrderedStops.filter(x=>routeOrdersCache.some(o=>o.id===x.order.id));
+        list.innerHTML='<div class="tablewrap" style="padding:12px;margin:8px 0;border-radius:12px"><b>Mulai — Lokasi perangkat</b><br><small>Ini titik awal, bukan pesanan pelanggan.</small></div>'+active.map((x,i)=>`<div class="tablewrap" style="padding:12px;margin:8px 0;border-radius:12px;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap"><div style="flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-weight:800">${i+1}</div><div style="min-width:0;flex:1"><b>TITIK ${i+1} — ${escapeHtml(x.order.id||"Pesanan")}</b><br><b>${escapeHtml(x.order.name||"Nama penerima tidak tersedia")}</b><br><small>WhatsApp: ${escapeHtml(x.order.whatsapp ? (String(x.order.whatsapp).startsWith("+") ? String(x.order.whatsapp) : "+"+String(x.order.whatsapp).replace(/^0/,"62")) : "Nomor tidak tersedia")}</small><br><small>${escapeHtml(x.order.deliveryDate||"")} · ${escapeHtml(x.order.deliveryTime||"")}</small><br><small>${escapeHtml(String(x.order.address||""))}</small>${!x.coord?'<br><small style="color:#a16207">Koordinat tidak ditemukan; ditempatkan setelah tujuan berkoordinat.</small>':''}</div><button type="button" class="primary" data-route-complete="${escapeHtml(x.order.id)}" style="flex:0 0 auto">✓ Selesai</button></div>`).join('')+'<p style="font-size:12px;color:var(--muted)">Catatan: daftar dan tautan Maps memakai urutan eksplisit yang sama agar pesanan tidak tertukar. Urutan terdekat dihitung dari jarak garis lurus berdasarkan koordinat GPS, bukan jarak atau waktu tempuh jalan. Untuk optimasi jalan sesungguhnya diperlukan layanan rute. Tujuan tanpa koordinat diletakkan di akhir.</p>';
+        list.querySelectorAll('[data-route-complete]').forEach(btn=>btn.addEventListener('click',()=>completeDeliveryOrder(btn.dataset.routeComplete,btn)));
+      };
+      window.__kdkmpLastRouteRender();
       window.open(url,"_blank","noopener");
     };
     if(!navigator.geolocation){startMaps("KDKMP Sidoharjo, Tanjunganom, Nganjuk",null);return;}
