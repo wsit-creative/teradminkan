@@ -166,7 +166,7 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
   </section>
   <section class="adminpanel" id="deliveryRoutePanel">
     <h2>Pengiriman — Rekomendasi Rute</h2>
-    <p style="color:var(--muted);font-size:13px">Menampilkan pesanan berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba atau terlewat dan belum selesai. Pesanan dengan jadwal mendatang tidak ditampilkan. Gunakan posisi GPS perangkat sebagai titik awal.</p>
+    <p style="color:var(--muted);font-size:13px">Menampilkan pesanan metode Antar berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba atau terlewat dan belum selesai. Pesanan Ambil di tempat diselesaikan langsung dari panel Cek Pesanan. Pesanan dengan jadwal mendatang tidak ditampilkan. Gunakan posisi GPS perangkat sebagai titik awal.</p>
     <div class="adminactions">
       <button class="primary" type="button" id="buildDeliveryRoute">📍 Buat Rekomendasi Rute</button>
       <button class="secondary" type="button" id="reloadDeliveryOrders">Muat Ulang Pengiriman</button>
@@ -254,7 +254,7 @@ body{background:linear-gradient(180deg,#fff 0%,#fff8f8 44%,#fff 100%);color:var(
 
 const CONFIG={
 
- APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbxifQZ044DUMhVyOOZWD5supni4FAkJPYn5tihrSMsmj_AObeGd6DL8gDAaJhjqbzg/exec", // Pastikan ini URL /exec deployment terbaru.
+ APPS_SCRIPT_URL:"https://script.google.com/macros/s/AKfycbwOqUp16B3hh0SKE7j2XG6ev4nMPCZ0roVg7vcvShrkRpnb0gntCbtoku4EaJXjodY/exec", // Pastikan ini URL /exec deployment terbaru.
 
  ADMIN_WHATSAPP:"6282338804175", // GANTI dengan nomor WhatsApp resmi KDKMP, format 62...
 
@@ -763,6 +763,10 @@ function showOrderDetail(order){
   selectedOrderId=order.id;
   const items=Array.isArray(order.items)?order.items:formatOrderItems(order.items);
   preparedItemsByOrder[order.id]=preparedItemsByOrder[order.id]||{};
+  const isPickupOrder=String(order.address||"").trim().toLowerCase()==="ambil di tempat";
+  const processButtonLabel=isPickupOrder?"SELESAI":"PESANAN DIKIRIM";
+  const targetOrderStatus=isPickupOrder?"SELESAI":"PESANAN DIKIRIM";
+  const processAction=isPickupOrder?"completePickupOrder":"markOrderShipped";
   const productImageUrl = it => {
     const sku = String(it.sku || it.SKU || it.kode || "").trim();
     const allProducts = [
@@ -774,27 +778,32 @@ function showOrderDetail(order){
       product?.image || product?.imageUrl || product?.image_url || product?.Image_URL || product?.foto || product?.gambar || "";
     return safeImageUrl(raw) || "";
   };
-  $("orderDetail").innerHTML=`<div class="tablewrap" style="padding:16px;border-radius:14px;background:#fff"><h3 style="margin-top:0">Pesanan ${escapeHtml(order.id)}</h3><p><b>Penerima:</b> ${escapeHtml(order.name)}<br><b>WhatsApp:</b> ${(()=>{const raw=String(order.whatsapp||"").trim();let phone=raw.replace(/\D/g,"");if(phone.startsWith("0"))phone="62"+phone.slice(1);else if(phone.startsWith("8"))phone="62"+phone;const display=raw||(phone?"+"+phone:"");return phone&&/^62\d{8,13}$/.test(phone)?`<a href="https://wa.me/${phone}" target="_blank" rel="noopener noreferrer" style="color:#168653;font-weight:700;text-decoration:underline">${escapeHtml(display.startsWith("+")?display:"+"+phone)} ↗</a>`:escapeHtml(display||"Nomor tidak tersedia")})()}<br><b>Alamat:</b> ${escapeHtml(order.address)}<br><b>Jadwal:</b> ${escapeHtml(order.deliveryDate||"-")} · ${escapeHtml(order.deliveryTime||"-")}<br><b>Catatan:</b> ${escapeHtml(order.note||"-")}</p><h4>Checklist barang yang disiapkan</h4><div id="orderItemChecks">${items.map((it,i)=>{const img=productImageUrl(it);return `<label style="display:flex;gap:10px;align-items:center;padding:12px;border-bottom:1px solid #eee;cursor:pointer"><input type="checkbox" data-item-index="${i}" ${preparedItemsByOrder[order.id][i]?"checked":""} style="width:20px;height:20px;flex:0 0 auto"><img src="${escapeHtml(img)}" alt="Foto ${escapeHtml(it.name||it.sku||"barang")}" loading="lazy" style="width:68px;height:68px;object-fit:contain;flex:0 0 68px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:zoom-in;${img?"":"display:none"}" onclick="event.preventDefault();event.stopPropagation();showOrderProductImage(this.src,this.alt)" onerror="this.style.display='none'"><span style="min-width:0"><b>${escapeHtml(it.name||it.sku||"Barang")}</b>${it.sku?`<br><small style="color:#6b7280">SKU: ${escapeHtml(it.sku)}</small>`:""}<br>Jumlah: ${Number(it.qty)||0} ${escapeHtml(it.unit||"pcs")} · ${money(it.subtotal??((Number(it.price)||0)*(Number(it.qty)||0)))}</span></label>`;}).join("")}</div><p id="orderChecklistHint" style="font-size:12px;color:var(--muted)">Centang semua barang setelah selesai disiapkan.</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button type="button" class="primary" id="markOrderShipped" style="flex:1;min-width:180px">PESANAN DIKIRIM</button><button type="button" class="secondary" id="cancelOrderButton" style="flex:1;min-width:180px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3">BATALKAN PESANAN</button></div></div>`;
-  $("orderItemChecks").querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.addEventListener("change",()=>{preparedItemsByOrder[order.id][cb.dataset.itemIndex]=cb.checked;const all=[...$("orderItemChecks").querySelectorAll('input[type="checkbox"]')].every(x=>x.checked);$("markOrderShipped").disabled=!all;$("orderChecklistHint").textContent=all?"Semua barang sudah dicentang. Pesanan siap ditandai dikirim.":"Centang semua barang setelah selesai disiapkan.";}));
+  $("orderDetail").innerHTML=`<div class="tablewrap" style="padding:16px;border-radius:14px;background:#fff"><h3 style="margin-top:0">Pesanan ${escapeHtml(order.id)}</h3><p><b>Penerima:</b> ${escapeHtml(order.name)}<br><b>WhatsApp:</b> ${(()=>{const raw=String(order.whatsapp||"").trim();let phone=raw.replace(/\D/g,"");if(phone.startsWith("0"))phone="62"+phone.slice(1);else if(phone.startsWith("8"))phone="62"+phone;const display=raw||(phone?"+"+phone:"");return phone&&/^62\d{8,13}$/.test(phone)?`<a href="https://wa.me/${phone}" target="_blank" rel="noopener noreferrer" style="color:#168653;font-weight:700;text-decoration:underline">${escapeHtml(display.startsWith("+")?display:"+"+phone)} ↗</a>`:escapeHtml(display||"Nomor tidak tersedia")})()}<br><b>Alamat:</b> ${escapeHtml(order.address)}<br><b>Jadwal:</b> ${escapeHtml(order.deliveryDate||"-")} · ${escapeHtml(order.deliveryTime||"-")}<br><b>Catatan:</b> ${escapeHtml(order.note||"-")}</p><h4>Checklist barang yang disiapkan</h4><div id="orderItemChecks">${items.map((it,i)=>{const img=productImageUrl(it);return `<label style="display:flex;gap:10px;align-items:center;padding:12px;border-bottom:1px solid #eee;cursor:pointer"><input type="checkbox" data-item-index="${i}" ${preparedItemsByOrder[order.id][i]?"checked":""} style="width:20px;height:20px;flex:0 0 auto"><img src="${escapeHtml(img)}" alt="Foto ${escapeHtml(it.name||it.sku||"barang")}" loading="lazy" style="width:68px;height:68px;object-fit:contain;flex:0 0 68px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:zoom-in;${img?"":"display:none"}" onclick="event.preventDefault();event.stopPropagation();showOrderProductImage(this.src,this.alt)" onerror="this.style.display='none'"><span style="min-width:0"><b>${escapeHtml(it.name||it.sku||"Barang")}</b>${it.sku?`<br><small style="color:#6b7280">SKU: ${escapeHtml(it.sku)}</small>`:""}<br>Jumlah: ${Number(it.qty)||0} ${escapeHtml(it.unit||"pcs")} · ${money(it.subtotal??((Number(it.price)||0)*(Number(it.qty)||0)))}</span></label>`;}).join("")}</div><p id="orderChecklistHint" style="font-size:12px;color:var(--muted)">Centang semua barang setelah selesai disiapkan atau siap diserahkan.</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button type="button" class="primary" id="markOrderShipped" style="flex:1;min-width:180px">${processButtonLabel}</button><button type="button" class="secondary" id="cancelOrderButton" style="flex:1;min-width:180px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3">BATALKAN PESANAN</button></div></div>`;
+  $("orderItemChecks").querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.addEventListener("change",()=>{preparedItemsByOrder[order.id][cb.dataset.itemIndex]=cb.checked;const all=[...$("orderItemChecks").querySelectorAll('input[type="checkbox"]')].every(x=>x.checked);$("markOrderShipped").disabled=!all;$("orderChecklistHint").textContent=all?"Semua barang sudah dicentang. Pesanan siap diproses.":"Centang semua barang setelah selesai disiapkan.";}));
+  $("markOrderShipped").disabled=!items.length||!items.every((_,i)=>preparedItemsByOrder[order.id][i]);
   $("markOrderShipped").disabled=!items.length||!items.every((_,i)=>preparedItemsByOrder[order.id][i]);
   $("markOrderShipped").onclick=async()=>{
     if(!items.length||!items.every((_,i)=>preparedItemsByOrder[order.id][i]))return toast("Centang semua barang yang sudah disiapkan terlebih dahulu.");
     let confirmed=false;
+    const verb=isPickupOrder?"menyelesaikan pengambilan":"mengubah status menjadi PESANAN DIKIRIM";
     if(window.Swal){
-      const result=await Swal.fire({icon:"question",title:"Kirim pesanan ini?",html:`<div style="font-size:14px;color:#52615a;margin:4px 0 12px">Ubah status pesanan</div><div style="font-weight:800;font-size:16px;overflow-wrap:anywhere;color:#173d2e">${escapeHtml(order.id)}</div><div style="margin-top:10px">menjadi <b style="color:#167447">PESANAN DIKIRIM</b>?</div>`,showCancelButton:true,confirmButtonText:"Ya, PESANAN DIKIRIM",cancelButtonText:"Batal",confirmButtonColor:"#b91c1c",cancelButtonColor:"#64748b",reverseButtons:true,focusCancel:true});
+      const result=await Swal.fire({icon:"question",title:isPickupOrder?"Selesaikan pesanan ambil di tempat?":"Kirim pesanan ini?",html:`<div style="font-size:14px;color:#52615a;margin:4px 0 12px">Ubah status pesanan</div><div style="font-weight:800;font-size:16px;overflow-wrap:anywhere;color:#173d2e">${escapeHtml(order.id)}</div><div style="margin-top:10px">menjadi <b style="color:#167447">${targetOrderStatus}</b>?</div>`,showCancelButton:true,confirmButtonText:isPickupOrder?"Ya, SELESAI":"Ya, PESANAN DIKIRIM",cancelButtonText:"Batal",confirmButtonColor:"#b91c1c",cancelButtonColor:"#64748b",reverseButtons:true,focusCancel:true});
       confirmed=result.isConfirmed;
-    }else confirmed=confirm("Ubah status pesanan "+order.id+" menjadi PESANAN DIKIRIM?");
+    }else confirmed=confirm("Ubah status pesanan "+order.id+" menjadi "+targetOrderStatus+"?");
     if(!confirmed)return;
-    $("markOrderShipped").disabled=true;$("markOrderShipped").textContent="Memproses…";
+    const actionButton=$("markOrderShipped");
+    actionButton.disabled=true;actionButton.textContent="Memproses…";
     try{
       const token=orderToken();
       if(!token) throw new Error("Masukkan token admin pada panel admin produk biasa terlebih dahulu.");
-      await apiWrite({action:"markOrderShipped",id:order.id,token});
-      if(window.Swal) await Swal.fire({icon:"success",title:"Permintaan diproses",text:"Status pesanan dikirim untuk diperbarui. Daftar akan dimuat ulang.",confirmButtonColor:"#b91c1c",timer:2200,timerProgressBar:true});
-      else toast("Permintaan perubahan status dikirim. Memuat ulang daftar…");
+      const result=await postSubsidyRequest({action:processAction,id:order.id,token});
+      if(!result||!result.ok)throw new Error(result?.error||"Server belum mengonfirmasi perubahan status.");
+      if(window.Swal) await Swal.fire({icon:"success",title:isPickupOrder?"Pesanan selesai":"Pesanan masuk daftar pengiriman",text:isPickupOrder?"Pesanan ambil di tempat berhasil diubah menjadi SELESAI.":"Status pesanan diubah menjadi PESANAN DIKIRIM. Pesanan akan masuk rekomendasi rute saat jadwalnya tiba.",confirmButtonColor:"#b91c1c",timer:2400,timerProgressBar:true});
+      else toast(isPickupOrder?"Pesanan ambil di tempat selesai.":"Pesanan ditandai dikirim.");
       await loadPendingOrders();$("orderDetail").innerHTML="";
+      if(!isPickupOrder)await loadDeliveryOrders();
     }catch(err){
-      $("markOrderShipped").disabled=false;$("markOrderShipped").textContent="PESANAN DIKIRIM";
+      actionButton.disabled=false;actionButton.textContent=processButtonLabel;
       if(window.Swal)Swal.fire({icon:"error",title:"Belum berhasil",text:err.message||"Gagal memperbarui status.",confirmButtonColor:"#b91c1c"});else toast(err.message||"Gagal memperbarui status.");
     }
   };
@@ -845,7 +854,7 @@ async function loadDeliveryOrders(){
     const res=await fetch(CONFIG.APPS_SCRIPT_URL,{method:"POST",mode:"cors",cache:"no-store",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"deliveryOrders",token})});
     const data=await res.json(); if(!data.ok) throw new Error(data.error||"Gagal memuat daftar pengiriman.");
     routeOrdersCache=Array.isArray(data.orders)?data.orders:[];
-    if(!routeOrdersCache.length){list.innerHTML='<div class="empty">Belum ada pesanan berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba dan belum selesai.</div>';if(status)status.textContent="Daftar pengiriman diperbarui.";return;}
+    if(!routeOrdersCache.length){list.innerHTML='<div class="empty">Belum ada pesanan Antar berstatus PESANAN DIKIRIM yang jadwalnya sudah tiba dan belum selesai.</div>';if(status)status.textContent="Daftar pengiriman diperbarui.";return;}
     list.innerHTML=routeOrdersCache.map(o=>`<div class="tablewrap" style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px;margin:8px 0;border-radius:12px;flex-wrap:wrap"><div style="min-width:180px;flex:1"><b>${escapeHtml(o.id)}</b> — ${escapeHtml(o.name||"")}<br><small>${escapeHtml(o.deliveryDate||"-")} · ${escapeHtml(o.deliveryTime||"-")}</small><br><small>${escapeHtml(o.address||"")}</small></div></div>`).join("");
     // Tombol Selesai sengaja tidak ditampilkan pada daftar mentah ini.
     if(status)status.textContent=`Ada ${routeOrdersCache.length} pesanan yang siap/terlambat dikirim dan belum berstatus SELESAI.`;
@@ -854,23 +863,71 @@ async function loadDeliveryOrders(){
 
 async function completeDeliveryOrder(id,btn){
   let confirmed=true;
-  if(window.Swal){const r=await Swal.fire({icon:"question",title:"Selesaikan pengiriman?",html:`Ubah status <b>${escapeHtml(id)}</b> menjadi <b>SELESAI</b>?`,showCancelButton:true,confirmButtonText:"Ya, selesai",cancelButtonText:"Batal",confirmButtonColor:"#b91c1c"});confirmed=r.isConfirmed;}
-  else confirmed=confirm(`Ubah status ${id} menjadi SELESAI?`);
+  if(window.Swal){
+    const r=await Swal.fire({
+      icon:"question",
+      title:"Selesaikan pengiriman?",
+      html:`Pesanan <b>${escapeHtml(id)}</b> akan diubah menjadi <b>SELESAI</b>. Setelah berhasil, pesanan akan hilang dari daftar rute.`,
+      showCancelButton:true,
+      confirmButtonText:"Ya, selesai",
+      cancelButtonText:"Batal",
+      confirmButtonColor:"#b91c1c"
+    });
+    confirmed=r.isConfirmed;
+  }else{
+    confirmed=confirm(`Selesaikan pengiriman ${id}? Pesanan akan hilang dari daftar rute.`);
+  }
   if(!confirmed)return;
-  btn.disabled=true;btn.textContent="Memproses…";
+
+  btn.disabled=true;
+  btn.textContent="Memproses…";
+
   try{
-    const token=orderToken();if(!token)throw new Error("Masukkan token admin pada panel Cek Pesanan terlebih dahulu.");
-    // Gunakan iframe bridge agar Apps Script mengembalikan JSON hasil nyata.
-    // fetch(mode:no-cors) hanya menghasilkan opaque response, sehingga suksesnya tidak dapat diperiksa.
-    const result=await postSubsidyRequest({action:"completeOrder",id,token});
-    if(!result||!result.ok)throw new Error(result?.error||"Server belum mengonfirmasi perubahan status.");
-    btn.textContent="✓ Selesai";btn.disabled=true;
-    toast("Status pesanan berhasil diubah menjadi SELESAI.");
-    routeOrdersCache=routeOrdersCache.filter(o=>o.id!==id);
+    const token=orderToken();
+    if(!token)throw new Error("Masukkan token admin pada panel Cek Pesanan terlebih dahulu.");
+
+    let completed=false;
+    let responseError=null;
+    try{
+      const result=await postSubsidyRequest({action:"completeOrder",id,token},30000);
+      if(result&&result.ok)completed=true;
+      else throw new Error(result?.error||"Server belum mengonfirmasi perubahan status.");
+    }catch(err){
+      responseError=err;
+    }
+
+    // Jika Sheet sudah berubah tetapi balasan iframe terlambat/hilang,
+    // verifikasi melalui daftar pengiriman: pesanan SELESAI tidak akan muncul lagi.
+    if(!completed){
+      const verifyRes=await fetch(CONFIG.APPS_SCRIPT_URL,{
+        method:"POST",mode:"cors",cache:"no-store",
+        headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body:JSON.stringify({action:"deliveryOrders",token})
+      });
+      if(!verifyRes.ok)throw responseError||new Error("Tidak dapat memverifikasi status pengiriman.");
+      const verifyData=await verifyRes.json();
+      if(!verifyData.ok)throw new Error(verifyData.error||"Gagal memverifikasi status pengiriman.");
+      const stillPending=(Array.isArray(verifyData.orders)?verifyData.orders:[]).some(o=>String(o.id)===String(id));
+      if(stillPending)throw responseError||new Error("Pesanan masih tercatat dalam daftar pengiriman.");
+      completed=true;
+    }
+
+    routeOrdersCache=routeOrdersCache.filter(o=>String(o.id)!==String(id));
+    if(window.__kdkmpOrderedStops){
+      window.__kdkmpOrderedStops=window.__kdkmpOrderedStops.filter(x=>String(x.order?.id)!==String(id));
+    }
+    if(window.Swal){
+      await Swal.fire({icon:"success",title:"Pengiriman selesai",text:"Status pesanan sudah SELESAI. Pesanan berhasil dihapus dari daftar rute.",confirmButtonColor:"#b91c1c",timer:2200,timerProgressBar:true});
+    }else{
+      toast("Pengiriman selesai. Pesanan dihapus dari daftar rute.");
+    }
     await loadDeliveryOrders();
-    // Bangun ulang daftar bernomor sesuai urutan rute yang tersimpan, tanpa mengubah urutan Maps.
     if(window.__kdkmpLastRouteRender)window.__kdkmpLastRouteRender();
-  }catch(err){btn.disabled=false;btn.textContent="✓ Selesai";toast(err.message||"Gagal menyelesaikan pengiriman.");}
+  }catch(err){
+    btn.disabled=false;
+    btn.textContent="✓ Selesai";
+    toast(err.message||"Gagal menyelesaikan pengiriman.");
+  }
 }
 function routeCoordinateForOrder(order){
   const raw=String(order.address||order.alamat||"").trim();
@@ -929,7 +986,7 @@ function openOptimizedDeliveryRoute(){
   const status=$("deliveryRouteStatus"), list=$("deliveryRouteStops");list.innerHTML="";status.textContent="Memuat daftar pengiriman dan meminta izin lokasi…";
   const go=async()=>{
     await loadDeliveryOrders();
-    if(!routeOrdersCache.length){status.textContent="Tidak ada pesanan yang jadwalnya sudah tiba dan belum selesai.";return;}
+    if(!routeOrdersCache.length){status.textContent="Tidak ada pesanan Antar yang jadwalnya sudah tiba dan belum selesai.";return;}
     const stops=routeOrdersCache.map(o=>({order:o,address:routeAddressForOrder(o),coord:routeCoordinateForOrder(o)})).filter(x=>x.address);
     if(!stops.length){status.textContent="Tidak ditemukan alamat/tautan Google Maps pada pesanan pengiriman.";return;}
     const startMaps=(origin,originCoord)=>{
